@@ -30,13 +30,25 @@ mkdir -p "${cache_dir}" "${output_dir}"
 
 haos_tag=$(git -C "${haos_dir}" describe --tags --exact-match 2>/dev/null || git -C "${haos_dir}" rev-parse --short HEAD)
 builder_image=${BUILDER_IMAGE:-"mixtile-haos-builder:${haos_tag}"}
+proxy_vars=(http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY NO_PROXY all_proxy ALL_PROXY)
+docker_build_args=()
+docker_run_args=()
 
-docker build -t "${builder_image}" -f "${haos_dir}/Dockerfile" "${haos_dir}"
+for proxy_var in "${proxy_vars[@]}"; do
+  proxy_value="${!proxy_var:-}"
+  if [[ -n "${proxy_value}" ]]; then
+    docker_build_args+=(--build-arg "${proxy_var}=${proxy_value}")
+    docker_run_args+=(-e "${proxy_var}=${proxy_value}")
+  fi
+done
+
+docker build "${docker_build_args[@]}" -t "${builder_image}" -f "${haos_dir}/Dockerfile" "${haos_dir}"
 
 run_builder() {
   docker run --rm --privileged \
     -e BUILDER_UID="$(id -u)" \
     -e BUILDER_GID="$(id -g)" \
+    "${docker_run_args[@]}" \
     -v "${repo_root}:/build" \
     -v "${cache_dir}:/cache" \
     -v "${output_dir}:/build/output" \
@@ -48,4 +60,3 @@ run_builder make -C /build/haos/buildroot O=/build/output BR2_EXTERNAL="${br2_ex
 run_builder make -C /build/haos/buildroot O=/build/output BR2_EXTERNAL="${br2_external}"
 
 echo "Build completed. Artifacts are under ${output_dir}/images/"
-
