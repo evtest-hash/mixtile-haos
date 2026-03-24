@@ -8,11 +8,16 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: read
+    env:
+      BR2_EXTERNAL_PATH: /build/haos/buildroot-external:/build/external
     steps:
       - name: Checkout source
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
         with:
           submodules: recursive
+
+      - name: Ensure submodules
+        run: git submodule update --init --recursive
 
       - name: Free disk space
         run: |
@@ -22,7 +27,37 @@ jobs:
           df -h
 
       - name: Build Mixtile Edge 2 image
-        run: scripts/build_edge2.sh
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$GITHUB_WORKSPACE/.cache" "$GITHUB_WORKSPACE/output"
+
+          haos_tag="$(git -C "$GITHUB_WORKSPACE/haos" describe --tags --exact-match 2>/dev/null || git -C "$GITHUB_WORKSPACE/haos" rev-parse --short HEAD)"
+          builder_image="mixtile-haos-builder:${haos_tag}"
+
+          docker build \
+            -t "$builder_image" \
+            -f "$GITHUB_WORKSPACE/haos/Dockerfile" \
+            "$GITHUB_WORKSPACE/haos"
+
+          docker run --rm --privileged \
+            -e BUILDER_UID="$(id -u)" \
+            -e BUILDER_GID="$(id -g)" \
+            -v "$GITHUB_WORKSPACE:/build" \
+            -v "$GITHUB_WORKSPACE/.cache:/cache" \
+            -v "$GITHUB_WORKSPACE/output:/build/output" \
+            "$builder_image" \
+            make -C /build/haos/buildroot O=/build/output BR2_EXTERNAL="${BR2_EXTERNAL_PATH}" mixtile_edge2_defconfig
+
+          docker run --rm --privileged \
+            -e BUILDER_UID="$(id -u)" \
+            -e BUILDER_GID="$(id -g)" \
+            -v "$GITHUB_WORKSPACE:/build" \
+            -v "$GITHUB_WORKSPACE/.cache:/cache" \
+            -v "$GITHUB_WORKSPACE/output:/build/output" \
+            "$builder_image" \
+            make -C /build/haos/buildroot O=/build/output BR2_EXTERNAL="${BR2_EXTERNAL_PATH}"
 
       - name: Upload image artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
@@ -31,4 +66,3 @@ jobs:
           path: |
             output/images/*.img.xz
             output/images/*.raucb
-

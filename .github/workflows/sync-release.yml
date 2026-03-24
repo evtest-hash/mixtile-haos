@@ -42,7 +42,7 @@ jobs:
               `Current pinned HAOS tag: \`${process.env.CURRENT_TAG || "unversioned"}\``,
               `Latest upstream HAOS tag: \`${process.env.LATEST_TAG}\``,
               ``,
-              `Run \`scripts/sync_haos_release.sh ${process.env.LATEST_TAG}\`, rebuild Mixtile Edge 2, and commit the updated submodule pointer.`,
+              `Update the \`haos/\` submodule to \`${process.env.LATEST_TAG}\`, rerun the Mixtile Edge 2 build workflow, and commit the updated submodule pointer.`,
             ].join("\n");
 
             const { data: issues } = await github.rest.issues.listForRepo({

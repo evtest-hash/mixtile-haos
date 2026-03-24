@@ -6,30 +6,11 @@
 
 - `haos/`: upstream `home-assistant/operating-system` pinned to a stable release tag
 - `external/`: Mixtile Edge 2 board support and patches
-- `scripts/`: local sync and build helpers
 
 ## Build
 
-The first build is intended to run on a Linux machine with Docker.
-
-```bash
-git submodule update --init --recursive
-scripts/build_edge2.sh
-```
-
-Artifacts are written to `output/images/`.
+Builds run in GitHub Actions through `.github/workflows/build-release.yml`.
 
 ## Sync upstream
 
-To move the `haos/` submodule to the latest stable HAOS release:
-
-```bash
-scripts/sync_haos_release.sh
-```
-
-To pin a specific HAOS release tag:
-
-```bash
-scripts/sync_haos_release.sh 17.1
-```
-
+When upstream publishes a new stable HAOS release, move the `haos/` submodule to that tag, then rerun the build workflow.
