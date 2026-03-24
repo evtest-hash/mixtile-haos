@@ -1,0 +1,123 @@
+name: Publish validated release
+
+on:
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: Validated git ref to publish (main or port/<version>)
+        required: true
+        type: string
+      version:
+        description: HAOS version pinned in haos/
+        required: true
+        type: choice
+        options:
+          - "11.5"
+          - "12.4"
+          - "13.2"
+          - "14.2"
+          - "15.2"
+          - "16.3"
+          - "17.1"
+      revision:
+        description: Release revision number for this HAOS version
+        required: true
+        type: string
+        default: "1"
+
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: write
+      contents: write
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+        with:
+          ref: ${{ inputs.git_ref }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Validate source version
+        id: source
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          haos_version="$(git -C haos describe --tags --exact-match 2>/dev/null || true)"
+          if [[ "${haos_version}" != "${VERSION}" ]]; then
+            echo "haos/ is pinned to ${haos_version}, expected ${VERSION}." >&2
+            exit 1
+          fi
+
+          source_sha="$(git rev-parse HEAD)"
+          release_tag="mixtile-haos-${VERSION}-r${{ inputs.revision }}"
+          echo "source_sha=${source_sha}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag if missing
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.source.outputs.release_tag }}
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags "https://github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "Tag ${RELEASE_TAG} already exists."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "${RELEASE_TAG}" "${SOURCE_SHA}"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${RELEASE_TAG}"
+
+      - name: Dispatch release build
+        id: dispatch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.source.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          dispatched_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          gh workflow run build-release.yml \
+            --ref main \
+            -f git_ref="${RELEASE_TAG}" \
+            -f mode=publish \
+            -f release_tag="${RELEASE_TAG}"
+
+          run_id=""
+          for _ in $(seq 1 30); do
+            run_id="$(
+              gh run list \
+                --workflow build-release.yml \
+                --event workflow_dispatch \
+                --limit 10 \
+                --json databaseId,createdAt \
+                --jq "map(select(.createdAt >= \"${dispatched_at}\"))[0].databaseId"
+            )"
+            if [[ -n "${run_id}" && "${run_id}" != "null" ]]; then
+              break
+            fi
+            sleep 10
+          done
+
+          if [[ -z "${run_id}" || "${run_id}" == "null" ]]; then
+            echo "Unable to resolve the publish run id." >&2
+            exit 1
+          fi
+
+          echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for publish result
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.dispatch.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          gh run watch "${RUN_ID}" --exit-status

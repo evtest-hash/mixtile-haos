@@ -48,7 +48,8 @@ jobs:
               `Required follow-up on \`main\`:`,
               `1. Update the \`haos/\` submodule to \`${latestTag}\`.`,
               `2. Adapt and validate Mixtile Edge 2 on \`main\`.`,
-              `3. Run the \`Build Mixtile Edge 2\` workflow with \`git_ref=main\` and \`release_tag=${releaseTag}\`.`,
+              `3. Run the \`Build Mixtile Edge 2\` workflow with \`git_ref=main\` and \`mode=validate\`.`,
+              `4. After validation succeeds, run \`Publish validated release\` for \`main\` with \`version=${latestTag}\` and \`revision=1\`.`,
               ``,
               `This repository only tracks the latest stable HAOS line on \`main\`. Historical major backfills belong on temporary \`port/<version>\` branches.`,
             ].join("\n");

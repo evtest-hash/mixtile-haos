@@ -8,8 +8,16 @@ on:
         required: true
         type: string
         default: main
+      mode:
+        description: Whether to only validate the build or publish a validated release
+        required: true
+        type: choice
+        default: validate
+        options:
+          - validate
+          - publish
       release_tag:
-        description: Optional GitHub Release tag in mixtile-haos-<version>-rN format
+        description: Required in publish mode; must be mixtile-haos-<version>-rN
         required: false
         type: string
 
@@ -42,14 +50,24 @@ jobs:
           echo "source_sha=${source_sha}" >> "$GITHUB_OUTPUT"
           echo "haos_version=${haos_version}" >> "$GITHUB_OUTPUT"
 
-      - name: Validate release tag format
-        if: ${{ inputs.release_tag != '' }}
+      - name: Validate release inputs
+        if: ${{ inputs.mode == 'publish' || inputs.release_tag != '' }}
         shell: bash
         env:
+          MODE: ${{ inputs.mode }}
           RELEASE_TAG: ${{ inputs.release_tag }}
           HAOS_VERSION: ${{ steps.source.outputs.haos_version }}
         run: |
           set -euo pipefail
+
+          if [[ "${MODE}" == "publish" && -z "${RELEASE_TAG}" ]]; then
+            echo "release_tag is required in publish mode." >&2
+            exit 1
+          fi
+
+          if [[ -z "${RELEASE_TAG}" ]]; then
+            exit 0
+          fi
 
           if [[ -z "${HAOS_VERSION}" ]]; then
             echo "Release builds require haos/ to be pinned to an exact upstream HAOS tag." >&2
@@ -61,63 +79,6 @@ jobs:
             echo "release_tag must match ${expected_pattern}" >&2
             exit 1
           fi
-
-      - name: Create or update draft release
-        if: ${{ inputs.release_tag != '' }}
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
-        env:
-          GIT_REF: ${{ inputs.git_ref }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
-          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
-          HAOS_VERSION: ${{ steps.source.outputs.haos_version }}
-        with:
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const tag = process.env.RELEASE_TAG;
-            const sourceSha = process.env.SOURCE_SHA;
-            const gitRef = process.env.GIT_REF;
-            const haosVersion = process.env.HAOS_VERSION;
-            const body = [
-              `Mixtile HAOS release for HAOS ${haosVersion}.`,
-              ``,
-              `Git ref: \`${gitRef}\``,
-              `Source commit: \`${sourceSha}\``,
-              `Upstream HAOS tag pinned in \`haos/\`: \`${haosVersion}\``,
-              ``,
-              `This release stays as a draft until the image is validated on Mixtile Edge 2.`,
-            ].join("\n");
-
-            try {
-              const { data } = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
-              await github.rest.repos.updateRelease({
-                owner,
-                repo,
-                release_id: data.id,
-                tag_name: tag,
-                target_commitish: sourceSha,
-                name: tag,
-                body,
-                draft: true,
-                prerelease: false,
-              });
-            } catch (error) {
-              if (error.status !== 404) {
-                throw error;
-              }
-
-              await github.rest.repos.createRelease({
-                owner,
-                repo,
-                tag_name: tag,
-                target_commitish: sourceSha,
-                name: tag,
-                body,
-                draft: true,
-                prerelease: false,
-                generate_release_notes: false,
-              });
-            }
 
       - name: Free disk space
         run: |
@@ -168,11 +129,36 @@ jobs:
             output/images/*.raucb
 
       - name: Upload release assets
-        if: ${{ inputs.release_tag != '' }}
+        if: ${{ inputs.mode == 'publish' }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GIT_REF: ${{ inputs.git_ref }}
+          HAOS_VERSION: ${{ steps.source.outputs.haos_version }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
-          gh release upload "${RELEASE_TAG}" output/images/*.img.xz output/images/*.raucb --clobber
+
+          release_notes="$(mktemp)"
+          {
+            echo "Mixtile HAOS release for HAOS ${HAOS_VERSION}."
+            echo
+            echo "Git ref: \`${GIT_REF}\`"
+            echo "Source commit: \`${{ steps.source.outputs.source_sha }}\`"
+            echo "Upstream HAOS tag pinned in \`haos/\`: \`${HAOS_VERSION}\`"
+          } > "${release_notes}"
+
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" output/images/*.img.xz output/images/*.raucb --clobber
+            gh release edit "${RELEASE_TAG}" \
+              --title "${RELEASE_TAG}" \
+              --notes-file "${release_notes}" \
+              --verify-tag
+          else
+            gh release create "${RELEASE_TAG}" \
+              output/images/*.img.xz \
+              output/images/*.raucb \
+              --title "${RELEASE_TAG}" \
+              --notes-file "${release_notes}" \
+              --verify-tag
+          fi

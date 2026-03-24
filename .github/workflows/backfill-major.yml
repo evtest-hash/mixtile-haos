@@ -27,7 +27,7 @@ on:
         default: false
 
 jobs:
-  dispatch:
+  validate:
     runs-on: ubuntu-22.04
     permissions:
       actions: write
@@ -38,11 +38,9 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ inputs.version }}
-          REVISION: ${{ inputs.revision }}
         run: |
           set -euo pipefail
           echo "git_ref=port/${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "release_tag=mixtile-haos-${VERSION}-r${REVISION}" >> "$GITHUB_OUTPUT"
 
       - name: Validate source branch exists
         shell: bash
@@ -58,7 +56,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           FORCE: ${{ inputs.force }}
-          RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
+          RELEASE_TAG: mixtile-haos-${{ inputs.version }}-r${{ inputs.revision }}
         run: |
           set -euo pipefail
           if [[ "${FORCE}" == "true" ]]; then
@@ -74,27 +72,69 @@ jobs:
 
       - name: Dispatch build workflow
         if: ${{ steps.existing.outputs.should_dispatch == 'true' }}
+        id: dispatch
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GIT_REF: ${{ steps.release.outputs.git_ref }}
-          RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
         run: |
           set -euo pipefail
+          dispatched_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
           gh workflow run build-release.yml \
             --ref main \
             -f git_ref="${GIT_REF}" \
-            -f release_tag="${RELEASE_TAG}"
+            -f mode=validate
+
+          run_id=""
+          for _ in $(seq 1 30); do
+            run_id="$(
+              gh run list \
+                --workflow build-release.yml \
+                --event workflow_dispatch \
+                --limit 10 \
+                --json databaseId,createdAt \
+                --jq "map(select(.createdAt >= \"${dispatched_at}\"))[0].databaseId"
+            )"
+            if [[ -n "${run_id}" && "${run_id}" != "null" ]]; then
+              break
+            fi
+            sleep 10
+          done
+
+          if [[ -z "${run_id}" || "${run_id}" == "null" ]]; then
+            echo "Unable to resolve the validation run id." >&2
+            exit 1
+          fi
+
+          echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for validation result
+        if: ${{ steps.existing.outputs.should_dispatch == 'true' }}
+        id: result
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.dispatch.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          if gh run watch "${RUN_ID}" --exit-status; then
+            echo "status=validated" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=failed" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
 
       - name: Write summary
+        if: always()
         run: |
           {
-            echo "# Backfill summary"
+            echo "# Backfill validation summary"
             echo ""
             echo "- Version: \`${{ inputs.version }}\`"
             echo "- Source branch: \`${{ steps.release.outputs.git_ref }}\`"
-            echo "- Release tag: \`${{ steps.release.outputs.release_tag }}\`"
-            echo "- Force rebuild: \`${{ inputs.force }}\`"
             echo "- Dispatched: \`${{ steps.existing.outputs.should_dispatch == 'true' }}\`"
+            echo "- Validation run id: \`${{ steps.dispatch.outputs.run_id || 'n/a' }}\`"
+            echo "- Validation status: \`${{ steps.result.outputs.status || 'skipped' }}\`"
             echo "- Requirement: prepare and push \`${{ steps.release.outputs.git_ref }}\` before running this workflow"
           } >> "$GITHUB_STEP_SUMMARY"
