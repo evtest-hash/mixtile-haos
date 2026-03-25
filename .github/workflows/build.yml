@@ -20,7 +20,7 @@ on:
         default: ""
 
 concurrency:
-  group: mixtile-haos-build
+  group: mixtile-haos-build-${{ inputs.source_ref }}
   cancel-in-progress: false
 
 jobs:
