@@ -32,9 +32,10 @@ jobs:
       contents: write
     env:
       BR2_EXTERNAL_PATH: /build/haos/buildroot-external:/build/external
-      BUILD_LOG_PATH: ${{ runner.temp }}/build-log.txt
-      LATEST_PHASE_PATH: ${{ runner.temp }}/latest-build-phase.txt
-      BUILD_EXIT_CODE_PATH: ${{ runner.temp }}/build-exit-code.txt
+      CI_STATE_DIR: /tmp/mixtile-haos-ci-state
+      BUILD_LOG_PATH: /tmp/mixtile-haos-ci-state/build-log.txt
+      LATEST_PHASE_PATH: /tmp/mixtile-haos-ci-state/latest-build-phase.txt
+      BUILD_EXIT_CODE_PATH: /tmp/mixtile-haos-ci-state/build-exit-code.txt
     steps:
       - name: Checkout source
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
@@ -115,6 +116,7 @@ jobs:
           set -euo pipefail
 
           mkdir -p "$GITHUB_WORKSPACE/.cache" "$GITHUB_WORKSPACE/output"
+          mkdir -p "$CI_STATE_DIR"
           : > "$BUILD_LOG_PATH"
           : > "$LATEST_PHASE_PATH"
           echo "0" > "$BUILD_EXIT_CODE_PATH"
@@ -236,7 +238,7 @@ jobs:
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: build-log
-          path: ${{ runner.temp }}/build-log.txt
+          path: /tmp/mixtile-haos-ci-state/build-log.txt
           if-no-files-found: warn
 
       - name: Write build summary
