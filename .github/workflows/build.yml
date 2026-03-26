@@ -27,10 +27,6 @@ on:
         type: string
         default: ""
 
-concurrency:
-  group: mixtile-haos-build-${{ inputs.source_ref }}
-  cancel-in-progress: false
-
 jobs:
   prepare:
     name: Prepare build
@@ -180,7 +176,6 @@ jobs:
         make -C /build/source/haos/buildroot
         O=/build/output
         BR2_EXTERNAL=/build/source/haos/buildroot-external:/build/source/external
-        BR2_JLEVEL=2
     steps:
       - name: Checkout control repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
