@@ -1,11 +1,11 @@
-name: Backfill major release
-run-name: Backfill ${{ inputs.version }}
+name: Validate supported release
+run-name: Validate ${{ inputs.version }}
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: Historical HAOS version from .github/major-targets.json
+        description: Supported HAOS release from .github/major-targets.json
         required: true
         type: string
 
@@ -23,7 +23,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Resolve backfill inputs
+      - name: Resolve release inputs
         id: release
         shell: bash
         env:
@@ -32,7 +32,7 @@ jobs:
           set -euo pipefail
 
           family="$(
-            python3 -c 'import json, os; version = os.environ["VERSION"].strip(); targets = json.load(open(".github/major-targets.json", "r", encoding="utf-8"))["historical_targets"]; matches = [item["family"] for item in targets if item["version"] == version]; print(matches[0]) if matches else (_ for _ in ()).throw(SystemExit(f"Unsupported historical target: {version}"))'
+            python3 -c 'import json, os; version = os.environ["VERSION"].strip(); targets = json.load(open(".github/major-targets.json", "r", encoding="utf-8"))["release_targets"]; matches = [item["family"] for item in targets if item["version"] == version]; print(matches[0]) if matches else (_ for _ in ()).throw(SystemExit(f"Unsupported release target: {version}"))'
           )"
 
           echo "source_ref=port/${VERSION}" >> "$GITHUB_OUTPUT"
@@ -106,7 +106,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "# Backfill validation summary"
+            echo "# Release validation summary"
             echo ""
             echo "- Version: \`${{ inputs.version }}\`"
             echo "- Family: \`${{ steps.release.outputs.family }}\`"
